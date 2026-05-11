@@ -1,11 +1,11 @@
-import os
 import sys
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 import dj_database_url
 import environ
-from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -14,12 +14,12 @@ environ.Env.read_env(BASE_DIR / ".env")
 
 try:
     SECRET_KEY = env("SECRET_KEY")
-except ImproperlyConfigured:
+except ImproperlyConfigured as err:
     raise ImproperlyConfigured(
         "SECRET_KEY environment variable is required. "
         "Generate one with: "
         'python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
-    )
+    ) from err
 
 DEBUG = env.bool("DEBUG", default=False)
 
@@ -171,12 +171,8 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    "DEFAULT_PERMISSION_CLASSES": (
-        "rest_framework.permissions.IsAuthenticated",
-    ),
-    "DEFAULT_RENDERER_CLASSES": (
-        "rest_framework.renderers.JSONRenderer",
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
@@ -221,9 +217,7 @@ SIMPLE_JWT = {
 }
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = env(
-    "CORS_ALLOWED_ORIGINS", default="http://localhost:5173"
-).split(",")
+CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS", default="http://localhost:5173").split(",")
 CORS_ALLOW_CREDENTIALS = True
 
 # ── Logging ───────────────────────────────────────────────────────────────────

@@ -1,7 +1,8 @@
 import json
 
-import anthropic
 from django.conf import settings
+
+import anthropic
 
 SYSTEM_PROMPT = (
     "You are a cybersecurity expert specializing in secure code review. "
@@ -43,9 +44,7 @@ def analyze_code(code: str, language: str = "") -> dict:
     Returns a parsed dict with `vulnerabilities`, `summary`, and `risk_score`.
     """
     client = get_client()
-    user_content = (
-        f"Language: {language}\n\n```\n{code}\n```" if language else f"```\n{code}\n```"
-    )
+    user_content = f"Language: {language}\n\n```\n{code}\n```" if language else f"```\n{code}\n```"
 
     response = client.messages.create(
         model=settings.CLAUDE_MODEL,

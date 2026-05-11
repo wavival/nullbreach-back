@@ -1,5 +1,6 @@
-import anthropic
 from django.conf import settings
+
+import anthropic
 
 SYSTEM_PROMPT = (
     "You are NullBreach, an expert AI cybersecurity assistant. "

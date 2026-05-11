@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from apps.claude_errors import handle_claude_error
 from apps.throttles import ClaudeScanThrottle
+
 from .claude import analyze_code
 from .serializers import ScanRequestSerializer, ScanResultSerializer
 

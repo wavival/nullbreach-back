@@ -2,6 +2,7 @@
 Tests for config.log_formatter.JSONFormatter — guarantees the production
 log line shape (one JSON object per record, ISO-8601 ts, exc_info flattened).
 """
+
 import json
 import logging
 from datetime import datetime
@@ -12,15 +13,15 @@ from config.log_formatter import JSONFormatter
 
 
 def _make_record(**overrides):
-    base = dict(
-        name="apps.test",
-        level=logging.INFO,
-        pathname=__file__,
-        lineno=1,
-        msg="hello %s",
-        args=("world",),
-        exc_info=None,
-    )
+    base = {
+        "name": "apps.test",
+        "level": logging.INFO,
+        "pathname": __file__,
+        "lineno": 1,
+        "msg": "hello %s",
+        "args": ("world",),
+        "exc_info": None,
+    }
     base.update(overrides)
     return logging.LogRecord(**base)
 

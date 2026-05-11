@@ -9,10 +9,12 @@ Critical auth tests:
   - refresh rotation issues new refresh and blacklists the old one
   - anon throttle blocks brute force on login
 """
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
+
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -59,7 +61,9 @@ class RegisterTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_register_invalid_email_format(self):
-        res = self.client.post(REGISTER_URL, {"email": "not-an-email", "password": "StrongPass123!"}, format="json")
+        res = self.client.post(
+            REGISTER_URL, {"email": "not-an-email", "password": "StrongPass123!"}, format="json"
+        )
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
 
@@ -75,11 +79,15 @@ class LoginTests(APITestCase):
         self.assertIn("refresh", res.data)
 
     def test_login_wrong_password(self):
-        res = self.client.post(LOGIN_URL, {"email": CREDENTIALS["email"], "password": "wrong"}, format="json")
+        res = self.client.post(
+            LOGIN_URL, {"email": CREDENTIALS["email"], "password": "wrong"}, format="json"
+        )
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_login_unknown_email(self):
-        res = self.client.post(LOGIN_URL, {"email": "nobody@example.com", "password": "whatever"}, format="json")
+        res = self.client.post(
+            LOGIN_URL, {"email": "nobody@example.com", "password": "whatever"}, format="json"
+        )
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
@@ -161,9 +169,7 @@ class RefreshRotationTests(APITestCase):
         "DEFAULT_AUTHENTICATION_CLASSES": (
             "rest_framework_simplejwt.authentication.JWTAuthentication",
         ),
-        "DEFAULT_PERMISSION_CLASSES": (
-            "rest_framework.permissions.IsAuthenticated",
-        ),
+        "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
         "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
         "PAGE_SIZE": 50,
         "DEFAULT_THROTTLE_RATES": {

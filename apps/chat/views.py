@@ -1,6 +1,7 @@
-import anthropic
 from django.db import transaction
 from django.db.models import Count
+
+import anthropic
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.generics import GenericAPIView
@@ -11,6 +12,7 @@ from rest_framework.views import APIView
 
 from apps.claude_errors import handle_claude_error
 from apps.throttles import ClaudeChatThrottle
+
 from .claude import MAX_HISTORY_MESSAGES, chat_completion
 from .models import ChatSession, Message
 from .serializers import ChatSessionSerializer, MessageSerializer, SendMessageSerializer
@@ -159,8 +161,9 @@ class MessageListCreateView(GenericAPIView):
         # Cap replayed history to bound token cost and prevent O(n²) growth.
         # Order by -created_at so we get the LAST N, then reverse to chronological.
         prior = list(
-            session.messages.order_by("-created_at")
-            .values("role", "content")[: MAX_HISTORY_MESSAGES - 1]
+            session.messages.order_by("-created_at").values("role", "content")[
+                : MAX_HISTORY_MESSAGES - 1
+            ]
         )
         history = list(reversed(prior)) + [{"role": Message.Role.USER, "content": user_content}]
 

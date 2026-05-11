@@ -10,13 +10,15 @@ Critical chat tests:
   - throttling returns 429
   - Claude failure rolls back user message
 """
+
 from unittest.mock import patch
 
-import anthropic
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import override_settings
 from django.urls import reverse
+
+import anthropic
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -75,9 +77,7 @@ class ChatSessionTests(APITestCase):
 
     def test_patch_session_title(self):
         session = ChatSession.objects.create(user=self.user, title="old")
-        res = self.client.patch(
-            session_detail_url(session.pk), {"title": "new"}, format="json"
-        )
+        res = self.client.patch(session_detail_url(session.pk), {"title": "new"}, format="json")
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         session.refresh_from_db()
         self.assertEqual(session.title, "new")
@@ -85,9 +85,7 @@ class ChatSessionTests(APITestCase):
     def test_patch_other_users_session_returns_404(self):
         other = User.objects.create_user(**OTHER_CREDENTIALS)
         session = ChatSession.objects.create(user=other, title="theirs")
-        res = self.client.patch(
-            session_detail_url(session.pk), {"title": "hacked"}, format="json"
-        )
+        res = self.client.patch(session_detail_url(session.pk), {"title": "hacked"}, format="json")
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_unauthenticated_returns_401(self):
@@ -178,9 +176,7 @@ class MessageTests(APITestCase):
         "DEFAULT_AUTHENTICATION_CLASSES": (
             "rest_framework_simplejwt.authentication.JWTAuthentication",
         ),
-        "DEFAULT_PERMISSION_CLASSES": (
-            "rest_framework.permissions.IsAuthenticated",
-        ),
+        "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
         "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
         "PAGE_SIZE": 50,
         "DEFAULT_THROTTLE_RATES": {

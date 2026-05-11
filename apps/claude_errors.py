@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 import anthropic
 from rest_framework import status
@@ -8,7 +7,7 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 
-def handle_claude_error(exc: anthropic.APIError) -> Optional[Response]:
+def handle_claude_error(exc: anthropic.APIError) -> Response | None:
     """Map an anthropic.APIError subclass to a DRF Response.
 
     Logs the full exception server-side and returns a user-safe message.

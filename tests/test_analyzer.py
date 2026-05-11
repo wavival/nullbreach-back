@@ -6,13 +6,15 @@ Critical analyzer tests:
   - Claude API error surfaces as 502
   - malformed Claude payload surfaces as 502
 """
+
 import json
 from unittest.mock import patch
 
-import anthropic
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.urls import reverse
+
+import anthropic
 from rest_framework import status
 from rest_framework.test import APITestCase
 
@@ -50,7 +52,9 @@ class ScanTests(APITestCase):
 
     @patch("apps.analyzer.views.analyze_code", return_value=MOCK_RESULT)
     def test_scan_returns_structured_result(self, mock_analyze):
-        res = self.client.post(SCAN_URL, {"code": VULNERABLE_CODE, "language": "python"}, format="json")
+        res = self.client.post(
+            SCAN_URL, {"code": VULNERABLE_CODE, "language": "python"}, format="json"
+        )
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertIn("vulnerabilities", res.data)
         self.assertIn("risk_score", res.data)
@@ -77,7 +81,9 @@ class ScanTests(APITestCase):
         res = self.client.post(SCAN_URL, {}, format="json")
         self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @patch("apps.analyzer.views.analyze_code", side_effect=anthropic.APIConnectionError(request=None))
+    @patch(
+        "apps.analyzer.views.analyze_code", side_effect=anthropic.APIConnectionError(request=None)
+    )
     def test_scan_claude_api_error_returns_502(self, _mock):
         res = self.client.post(SCAN_URL, {"code": VULNERABLE_CODE}, format="json")
         self.assertEqual(res.status_code, status.HTTP_502_BAD_GATEWAY)

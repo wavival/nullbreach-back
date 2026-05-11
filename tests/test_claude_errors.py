@@ -3,10 +3,12 @@ Unit tests for apps.claude_errors.handle_claude_error — covers each
 anthropic.APIError subclass branch in isolation so the mapping cannot
 silently regress when the SDK is upgraded.
 """
+
 from types import SimpleNamespace
 
-import anthropic
 from django.test import TestCase
+
+import anthropic
 from rest_framework import status
 
 from apps.claude_errors import handle_claude_error
@@ -40,9 +42,7 @@ class HandleClaudeErrorTests(TestCase):
     def test_rate_limit_error_returns_429_with_retry_after(self):
         exc = anthropic.RateLimitError(
             message="slow down",
-            response=SimpleNamespace(
-                status_code=429, headers={"retry-after": "7"}, request=None
-            ),
+            response=SimpleNamespace(status_code=429, headers={"retry-after": "7"}, request=None),
             body=None,
         )
         res = handle_claude_error(exc)

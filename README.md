@@ -6,7 +6,7 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Django](https://img.shields.io/badge/Django-5.1.4-092E20?logo=django&logoColor=white)
 ![DRF](https://img.shields.io/badge/DRF-3.15.2-A30000)
-![Tests](https://img.shields.io/badge/tests-28%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 **Live demo:** [wavival.dev/nullbreach](https://wavival.dev/nullbreach)
@@ -39,7 +39,7 @@
 | **Framework** | Django 5.1.4 + Django REST Framework 3.15.2 |
 | **Database** | PostgreSQL (production) — SQLite fallback for local dev |
 | **Authentication** | JSON Web Tokens via `djangorestframework-simplejwt` 5.3.1 (access + refresh, rotation, blacklist) |
-| **AI** | Claude `claude-sonnet-4-20250514` via the official Anthropic Python SDK (`anthropic` 0.40.0) |
+| **AI** | Claude `claude-haiku-4-5-20251001` via the official Anthropic Python SDK (`anthropic` 0.101.0) |
 | **API docs** | OpenAPI 3 schema + Swagger UI via `drf-spectacular` 0.28.0 |
 | **Rate limiting** | Built-in DRF throttling (per-user, per-scope) |
 | **Static files** | WhiteNoise (`CompressedManifestStaticFilesStorage`) |
@@ -59,7 +59,7 @@
 - **Auto-generated API docs** — Swagger UI at `/api/docs/` and OpenAPI 3 schema at `/api/schema/`, generated from view signatures and serializers via `drf-spectacular`.
 - **Request audit logging** — Every request is logged with method, path, status, and duration via a custom middleware.
 - **Production hardening** — Trusts the `X-Forwarded-Proto` header so HTTPS is recognised behind Railway's proxy. When `DEBUG=False`, session and CSRF cookies are marked secure, and the app refuses to boot without `ANTHROPIC_API_KEY`. SSL redirection and HSTS are intentionally delegated to the platform proxy.
-- **28 automated tests** — Covering auth flows, chat ownership and persistence, analyzer validation, and Claude error handling (Claude is mocked).
+- **49 automated tests (90% coverage)** — Covering auth flows, chat ownership and persistence, analyzer validation, Claude error handling, and structured JSON logging (Claude is mocked).
 
 ---
 
@@ -143,6 +143,8 @@ All variables are loaded from a `.env` file in the project root (via `python-dot
 | `ANTHROPIC_API_KEY` | **Required in prod** + needed for chat/analyzer to function | `sk-ant-api03-...` | [console.anthropic.com](https://console.anthropic.com/) → **Settings → API Keys → Create Key**. |
 | `ALLOWED_HOSTS` | Always | `localhost,127.0.0.1,api.example.com` | Comma-separated list of hostnames Django will accept. |
 | `CORS_ALLOWED_ORIGINS` | Always | `http://localhost:5173,https://wavival.dev` | Comma-separated list of frontend origins allowed to call the API. |
+| `REDIS_URL` | Optional | `redis://...` | If set, throttle counters use Redis. Otherwise the DB cache table is used (created by the `release` step on Railway). |
+| `SECURE_HSTS_SECONDS` | Optional (prod) | `31536000` | Override the 1-year HSTS default. Set to `0` to disable HSTS temporarily. |
 
 ---
 
@@ -363,7 +365,7 @@ The test suite covers the critical paths of each app. Claude is mocked in chat a
 python manage.py test tests
 ```
 
-Expected: **28 tests passing**.
+Expected: **49 tests passing, ~90% coverage**.
 
 ### Run a specific file
 
@@ -377,9 +379,11 @@ python manage.py test tests.test_analyzer
 
 | File | Tests | Coverage |
 |---|---|---|
-| `tests/test_auth.py` | 12 | Register success / duplicate email / weak password; login success / wrong password / unknown email; `/me/` authenticated / unauthenticated / invalid token; logout blacklists refresh / missing refresh / requires auth |
-| `tests/test_chat.py` | 10 | Create session, list only own sessions, delete session, deleting other user's session returns 404, unauthenticated → 401, list messages (empty + ordered), send message persists both sides and calls Claude, auto-title on first message, cross-user message send returns 404 |
+| `tests/test_auth.py` | 12 | Register success / duplicate email (silent 202) / weak password; login success / wrong password / unknown email; `/me/` authenticated / unauthenticated / invalid token; logout blacklists refresh / missing refresh / requires auth |
+| `tests/test_chat.py` | 11 | Create session, list only own sessions, delete session, deleting other user's session returns 404, unauthenticated → 401, list messages (empty + ordered), send message persists both sides and calls Claude, auto-title on first message, cross-user message send returns 404, rolls back user message on Claude failure |
 | `tests/test_analyzer.py` | 6 | Authenticated scan returns structured result, default language, unauthenticated → 401, empty code → 400, missing code → 400, Claude API error → 502 |
+| `tests/test_claude_errors.py` | 16 | `handle_claude_error` maps Anthropic error subclasses to DRF responses (401/404/429/502), preserves `Retry-After`, ignores non-Anthropic exceptions |
+| `tests/test_log_formatter.py` | 4 | `JSONFormatter` emits one JSON object per line; flattens exc_info; merges `extra={...}` fields; reserved fields not duplicated |
 
 ---
 
@@ -389,8 +393,10 @@ The repo is configured to deploy out of the box on [Railway](https://railway.app
 
 ```
 web: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
-release: python manage.py migrate
+release: python manage.py migrate && python manage.py createcachetable
 ```
+
+> **Why `createcachetable`?** The default cache backend in production is `DatabaseCache` (used by DRF throttling to share counters across Gunicorn workers). The release step creates the `django_cache` table once; subsequent deploys are no-ops. Set `REDIS_URL` if you'd rather use Redis.
 
 ### Steps
 
