@@ -59,6 +59,22 @@ class ChatSessionDetailView(APIView):
         session.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @extend_schema(
+        request=ChatSessionSerializer,
+        responses={200: ChatSessionSerializer},
+        summary="Update a chat session (e.g. rename title)",
+        tags=["chat"],
+    )
+    def patch(self, request, session_id):
+        session = self._get_session(request, session_id)
+        if session is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = ChatSessionSerializer(session, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        serializer.save()
+        return Response(serializer.data)
+
 
 class MessageListCreateView(APIView):
     permission_classes = [IsAuthenticated]
