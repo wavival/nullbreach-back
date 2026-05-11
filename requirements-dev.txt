@@ -1,0 +1,12 @@
+-r requirements.txt
+
+# Linting & formatting
+black==24.10.0
+isort==5.13.2
+ruff==0.8.4
+
+# Testing
+coverage==7.6.10
+
+# Pre-commit hooks (optional, used by .pre-commit-config.yaml)
+pre-commit==4.0.1

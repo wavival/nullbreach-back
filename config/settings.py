@@ -120,14 +120,51 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Railway terminates TLS at its proxy and forwards the original scheme
 # via X-Forwarded-Proto, so Django must trust that header to recognise
 # incoming requests as HTTPS. SSL_REDIRECT is left off (Railway's proxy
-# already redirects), and HSTS is disabled for now to keep the deploy flexible.
+# already redirects).
 SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-SECURE_HSTS_SECONDS = 0
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+X_FRAME_OPTIONS = "DENY"
 
 if not DEBUG and not _testing:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    # 1 year HSTS — only enabled outside dev/test to avoid pinning HTTPS on
+    # localhost. Opt out via SECURE_HSTS_SECONDS=0 in env if needed.
+    SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31_536_000)
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+else:
+    SECURE_HSTS_SECONDS = 0
+
+# ── Cache ──────────────────────────────────────────────────────────────────────
+# Throttle counters live in the cache; gunicorn workers MUST share state, so we
+# must not use the default per-process LocMemCache in production. Prefer Redis
+# when REDIS_URL is set; otherwise fall back to the database cache table
+# `django_cache` (created by `python manage.py createcachetable`).
+REDIS_URL = env("REDIS_URL", default="")
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+elif _testing or DEBUG:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "nullbreach-dev",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+            "LOCATION": "django_cache",
+        }
+    }
 
 # ── Django REST Framework ──────────────────────────────────────────────────────
 REST_FRAMEWORK = {
@@ -141,11 +178,16 @@ REST_FRAMEWORK = {
         "rest_framework.renderers.JSONRenderer",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "user": "500/hour",
+        "anon": "60/hour",
+        "auth": "10/min",
         "claude_chat": "60/hour",
         "claude_scan": "20/hour",
     },
@@ -171,7 +213,7 @@ SPECTACULAR_SETTINGS = {
 
 # ── Simple JWT ─────────────────────────────────────────────────────────────────
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -185,19 +227,27 @@ CORS_ALLOWED_ORIGINS = env(
 CORS_ALLOW_CREDENTIALS = True
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+# `text` formatter is for local development (human-readable). In production
+# (DEBUG=False) we emit one JSON object per line so log aggregators
+# (Railway, Loki, Datadog) can parse fields without regex.
+LOG_FORMATTER = "text" if DEBUG or _testing else "json"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "standard": {
+        "text": {
             "format": "{asctime} {levelname} {name} {message}",
             "style": "{",
+        },
+        "json": {
+            "()": "config.log_formatter.JSONFormatter",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "standard",
+            "formatter": LOG_FORMATTER,
         },
     },
     "root": {

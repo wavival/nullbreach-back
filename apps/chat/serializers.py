@@ -11,7 +11,9 @@ class MessageSerializer(serializers.ModelSerializer):
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
-    message_count = serializers.IntegerField(source="messages.count", read_only=True)
+    # `message_count` is provided by the view's queryset annotation
+    # (Count("messages")) — avoids one COUNT(*) per session on list endpoints.
+    message_count = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = ChatSession

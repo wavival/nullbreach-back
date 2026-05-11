@@ -14,6 +14,10 @@ class ChatSession(models.Model):
 
     class Meta:
         ordering = ["-updated_at"]
+        indexes = [
+            # Covers the canonical "list my sessions, newest first" query.
+            models.Index(fields=["user", "-updated_at"], name="chat_sess_user_upd_idx"),
+        ]
 
     def __str__(self):
         return f"Session {self.pk} — {self.user.email}"
@@ -35,6 +39,11 @@ class Message(models.Model):
 
     class Meta:
         ordering = ["created_at"]
+        indexes = [
+            # Speeds up the history scan in MessageListCreateView.post
+            # (ordering by created_at within a session).
+            models.Index(fields=["session", "created_at"], name="chat_msg_sess_created_idx"),
+        ]
 
     def __str__(self):
         return f"[{self.role}] {self.content[:60]}"

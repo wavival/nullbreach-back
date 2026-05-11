@@ -6,10 +6,16 @@ Critical chat tests:
   - list messages
   - send message calls Claude and persists both sides
   - unauthenticated requests return 401
+  - PATCH session title
+  - throttling returns 429
+  - Claude failure rolls back user message
 """
 from unittest.mock import patch
 
+import anthropic
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -35,6 +41,7 @@ def messages_url(session_id):
 
 class ChatSessionTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(**CREDENTIALS)
         login = self.client.post(LOGIN_URL, CREDENTIALS, format="json")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
@@ -43,6 +50,7 @@ class ChatSessionTests(APITestCase):
         res = self.client.post(SESSIONS_URL, {"title": "My session"}, format="json")
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(ChatSession.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(res.data["message_count"], 0)
 
     def test_list_sessions_returns_only_own(self):
         other = User.objects.create_user(**OTHER_CREDENTIALS)
@@ -50,8 +58,8 @@ class ChatSessionTests(APITestCase):
         ChatSession.objects.create(user=other, title="Not mine")
         res = self.client.get(SESSIONS_URL)
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(res.data), 1)
-        self.assertEqual(res.data[0]["title"], "Mine")
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["title"], "Mine")
 
     def test_delete_session(self):
         session = ChatSession.objects.create(user=self.user)
@@ -65,6 +73,23 @@ class ChatSessionTests(APITestCase):
         res = self.client.delete(session_detail_url(session.pk))
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
 
+    def test_patch_session_title(self):
+        session = ChatSession.objects.create(user=self.user, title="old")
+        res = self.client.patch(
+            session_detail_url(session.pk), {"title": "new"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        session.refresh_from_db()
+        self.assertEqual(session.title, "new")
+
+    def test_patch_other_users_session_returns_404(self):
+        other = User.objects.create_user(**OTHER_CREDENTIALS)
+        session = ChatSession.objects.create(user=other, title="theirs")
+        res = self.client.patch(
+            session_detail_url(session.pk), {"title": "hacked"}, format="json"
+        )
+        self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
     def test_unauthenticated_returns_401(self):
         self.client.credentials()
         res = self.client.get(SESSIONS_URL)
@@ -73,6 +98,7 @@ class ChatSessionTests(APITestCase):
 
 class MessageTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(**CREDENTIALS)
         login = self.client.post(LOGIN_URL, CREDENTIALS, format="json")
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
@@ -81,7 +107,8 @@ class MessageTests(APITestCase):
     def test_list_messages_empty(self):
         res = self.client.get(messages_url(self.session.pk))
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(res.data, [])
+        self.assertEqual(res.data["count"], 0)
+        self.assertEqual(res.data["results"], [])
 
     @patch("apps.chat.views.chat_completion", return_value="Here is my security advice.")
     def test_send_message_persists_both_and_returns_assistant(self, mock_claude):
@@ -110,6 +137,21 @@ class MessageTests(APITestCase):
         self.session.refresh_from_db()
         self.assertEqual(self.session.title, "Tell me about OWASP")
 
+    @patch(
+        "apps.chat.views.chat_completion",
+        side_effect=anthropic.APIConnectionError(request=None),
+    )
+    def test_send_message_rolls_back_user_message_on_claude_failure(self, _mock):
+        res = self.client.post(
+            messages_url(self.session.pk),
+            {"content": "Will fail"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_502_BAD_GATEWAY)
+        # User message must NOT be persisted when Claude fails — otherwise
+        # the session ends up with an orphaned user msg and no assistant reply.
+        self.assertEqual(Message.objects.filter(session=self.session).count(), 0)
+
     def test_send_message_to_other_session_returns_404(self):
         other = User.objects.create_user(**OTHER_CREDENTIALS)
         other_session = ChatSession.objects.create(user=other)
@@ -125,6 +167,44 @@ class MessageTests(APITestCase):
         Message.objects.create(session=self.session, role="assistant", content="second")
         res = self.client.get(messages_url(self.session.pk))
         self.assertEqual(res.status_code, status.HTTP_200_OK)
-        self.assertEqual(len(res.data), 2)
-        self.assertEqual(res.data[0]["content"], "first")
-        self.assertEqual(res.data[1]["content"], "second")
+        self.assertEqual(res.data["count"], 2)
+        results = res.data["results"]
+        self.assertEqual(results[0]["content"], "first")
+        self.assertEqual(results[1]["content"], "second")
+
+
+@override_settings(
+    REST_FRAMEWORK={
+        "DEFAULT_AUTHENTICATION_CLASSES": (
+            "rest_framework_simplejwt.authentication.JWTAuthentication",
+        ),
+        "DEFAULT_PERMISSION_CLASSES": (
+            "rest_framework.permissions.IsAuthenticated",
+        ),
+        "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+        "PAGE_SIZE": 50,
+        "DEFAULT_THROTTLE_RATES": {
+            "user": "500/hour",
+            "anon": "60/hour",
+            "auth": "10/min",
+            "claude_chat": "2/hour",
+            "claude_scan": "20/hour",
+        },
+    }
+)
+class ChatThrottleTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(**CREDENTIALS)
+        login = self.client.post(LOGIN_URL, CREDENTIALS, format="json")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        self.session = ChatSession.objects.create(user=self.user)
+
+    @patch("apps.chat.views.chat_completion", return_value="ok")
+    def test_chat_throttle_returns_429_after_limit(self, _mock):
+        url = messages_url(self.session.pk)
+        for _ in range(2):
+            ok = self.client.post(url, {"content": "hi"}, format="json")
+            self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
+        blocked = self.client.post(url, {"content": "hi"}, format="json")
+        self.assertEqual(blocked.status_code, status.HTTP_429_TOO_MANY_REQUESTS)

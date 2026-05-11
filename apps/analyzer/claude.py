@@ -23,14 +23,29 @@ SYSTEM_PROMPT = (
     "}"
 )
 
+# Module-level singleton — see apps/chat/claude.py for the rationale.
+_client: anthropic.Anthropic | None = None
+
+
+def get_client() -> anthropic.Anthropic:
+    global _client
+    if _client is None:
+        key = settings.ANTHROPIC_API_KEY
+        if not key:
+            raise ValueError("ANTHROPIC_API_KEY is not configured.")
+        _client = anthropic.Anthropic(api_key=key)
+    return _client
+
 
 def analyze_code(code: str, language: str = "") -> dict:
+    """Send a code snippet to Claude for OWASP Top 10 analysis.
+
+    Returns a parsed dict with `vulnerabilities`, `summary`, and `risk_score`.
     """
-    Send a code snippet to Claude for OWASP Top 10 analysis.
-    Returns a parsed dict with vulnerabilities, summary, and risk_score.
-    """
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    user_content = f"Language: {language}\n\n```\n{code}\n```" if language else f"```\n{code}\n```"
+    client = get_client()
+    user_content = (
+        f"Language: {language}\n\n```\n{code}\n```" if language else f"```\n{code}\n```"
+    )
 
     response = client.messages.create(
         model=settings.CLAUDE_MODEL,
@@ -41,7 +56,8 @@ def analyze_code(code: str, language: str = "") -> dict:
 
     raw = response.content[0].text.strip()
 
-    # Strip markdown fences if Claude wraps the JSON anyway
+    # Claude is asked for raw JSON but sometimes wraps it in ```json fences;
+    # strip them so the downstream json.loads call succeeds.
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1]
         raw = raw.rsplit("```", 1)[0]
