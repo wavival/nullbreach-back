@@ -1,9 +1,9 @@
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+import environ
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+environ.Env.read_env(Path(__file__).resolve().parent.parent / ".env")
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 

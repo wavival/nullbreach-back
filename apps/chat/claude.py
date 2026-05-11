@@ -10,7 +10,11 @@ SYSTEM_PROMPT = (
 
 
 def get_client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    from django.conf import settings
+    key = settings.ANTHROPIC_API_KEY
+    if not key:
+        raise ValueError("ANTHROPIC_API_KEY no configurada")
+    return anthropic.Anthropic(api_key=key)
 
 def chat_completion(history: list[dict]) -> str:
     """

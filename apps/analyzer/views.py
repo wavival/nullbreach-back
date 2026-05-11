@@ -1,4 +1,5 @@
 import json
+import logging
 
 import anthropic
 from drf_spectacular.utils import extend_schema
@@ -7,9 +8,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.claude_errors import handle_claude_error
 from apps.throttles import ClaudeScanThrottle
 from .claude import analyze_code
 from .serializers import ScanRequestSerializer, ScanResultSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class ScanView(APIView):
@@ -32,28 +36,12 @@ class ScanView(APIView):
 
         try:
             result = analyze_code(code, language)
-        except anthropic.NotFoundError as exc:
-            return Response(
-                {"detail": f"Claude model or resource not found: {exc}"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except anthropic.RateLimitError as exc:
-            response = Response(
-                {"detail": f"Claude rate limit exceeded: {exc}"},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-            retry_after = getattr(exc, "response", None) and exc.response.headers.get("retry-after")
-            if retry_after:
-                response["Retry-After"] = retry_after
-            return response
         except anthropic.APIError as exc:
-            return Response(
-                {"detail": f"Claude API error: {exc}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return handle_claude_error(exc)
         except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            logger.error("Failed to parse Claude analysis result: %s", exc, exc_info=True)
             return Response(
-                {"detail": f"Failed to parse analysis result: {exc}"},
+                {"detail": "AI service returned an unexpected response. Please try again."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 

@@ -4,25 +4,26 @@ from datetime import timedelta
 from pathlib import Path
 
 import dj_database_url
+import environ
 from django.core.exceptions import ImproperlyConfigured
-from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(BASE_DIR / ".env")
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / ".env")
 
 try:
-    SECRET_KEY = os.environ["SECRET_KEY"]
-except KeyError:
+    SECRET_KEY = env("SECRET_KEY")
+except ImproperlyConfigured:
     raise ImproperlyConfigured(
         "SECRET_KEY environment variable is required. "
         "Generate one with: "
         'python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
     )
 
-DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
+DEBUG = env.bool("DEBUG", default=False)
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = env("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -77,9 +78,19 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+_testing = "test" in sys.argv
+DATABASE_URL = env("DATABASE_URL", default="sqlite:///db.sqlite3")
+
+if not DEBUG and not _testing and DATABASE_URL == "sqlite:///db.sqlite3":
+    raise ImproperlyConfigured(
+        "DATABASE_URL environment variable is required in production. "
+        "Set it to a PostgreSQL connection string, e.g. "
+        "postgresql://user:password@host:5432/dbname"
+    )
+
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.getenv("DATABASE_URL", "sqlite:///db.sqlite3"),
+        default=DATABASE_URL,
         conn_max_age=600,
         conn_health_checks=True,
     )
@@ -114,7 +125,6 @@ SECURE_SSL_REDIRECT = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_HSTS_SECONDS = 0
 
-_testing = "test" in sys.argv
 if not DEBUG and not _testing:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
@@ -169,8 +179,8 @@ SIMPLE_JWT = {
 }
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = os.getenv(
-    "CORS_ALLOWED_ORIGINS", "http://localhost:5173"
+CORS_ALLOWED_ORIGINS = env(
+    "CORS_ALLOWED_ORIGINS", default="http://localhost:5173"
 ).split(",")
 CORS_ALLOW_CREDENTIALS = True
 
@@ -214,8 +224,11 @@ LOGGING = {
 }
 
 # ── Anthropic ──────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_API_KEY = env("ANTHROPIC_API_KEY", default="")
 CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
-if not DEBUG and not ANTHROPIC_API_KEY:
-    raise ImproperlyConfigured("ANTHROPIC_API_KEY environment variable is required in production.")
+if not DEBUG and not _testing and not ANTHROPIC_API_KEY:
+    raise ImproperlyConfigured(
+        "ANTHROPIC_API_KEY environment variable is required in production. "
+        "Get one at https://console.anthropic.com/ → Settings → API Keys."
+    )

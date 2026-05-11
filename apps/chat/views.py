@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.claude_errors import handle_claude_error
 from apps.throttles import ClaudeChatThrottle
 from .claude import chat_completion
 from .models import ChatSession, Message
@@ -113,25 +114,8 @@ class MessageListCreateView(APIView):
 
         try:
             assistant_content = chat_completion(history)
-        except anthropic.NotFoundError as exc:
-            return Response(
-                {"detail": f"Claude model or resource not found: {exc}"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        except anthropic.RateLimitError as exc:
-            response = Response(
-                {"detail": f"Claude rate limit exceeded: {exc}"},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
-            retry_after = getattr(exc, "response", None) and exc.response.headers.get("retry-after")
-            if retry_after:
-                response["Retry-After"] = retry_after
-            return response
         except anthropic.APIError as exc:
-            return Response(
-                {"detail": f"Claude API error: {exc}"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+            return handle_claude_error(exc)
 
         # Persist assistant message
         assistant_message = Message.objects.create(
