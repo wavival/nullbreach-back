@@ -105,13 +105,17 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ── Security (production only) ─────────────────────────────────────────────────
+# ── Security & SSL ─────────────────────────────────────────────────────────
+# Railway terminates TLS at its proxy and forwards the original scheme
+# via X-Forwarded-Proto, so Django must trust that header to recognise
+# incoming requests as HTTPS. SSL_REDIRECT is left off (Railway's proxy
+# already redirects), and HSTS is disabled for now to keep the deploy flexible.
+SECURE_SSL_REDIRECT = False
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_HSTS_SECONDS = 0
+
 _testing = "test" in sys.argv
 if not DEBUG and not _testing:
-    SECURE_SSL_REDIRECT = True
-    SECURE_HSTS_SECONDS = 31536000
-    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-    SECURE_HSTS_PRELOAD = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 

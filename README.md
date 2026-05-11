@@ -58,7 +58,7 @@
 - **Per-endpoint rate limiting** — Strict throttles on Claude-backed endpoints (`60/h` chat, `20/h` scan) and a generous default for everything else (`500/h`).
 - **Auto-generated API docs** — Swagger UI at `/api/docs/` and OpenAPI 3 schema at `/api/schema/`, generated from view signatures and serializers via `drf-spectacular`.
 - **Request audit logging** — Every request is logged with method, path, status, and duration via a custom middleware.
-- **Production hardening** — When `DEBUG=False`: HTTPS redirect, HSTS preload, secure session and CSRF cookies, and a startup check that refuses to boot without `ANTHROPIC_API_KEY`.
+- **Production hardening** — Trusts the `X-Forwarded-Proto` header so HTTPS is recognised behind Railway's proxy. When `DEBUG=False`, session and CSRF cookies are marked secure, and the app refuses to boot without `ANTHROPIC_API_KEY`. SSL redirection and HSTS are intentionally delegated to the platform proxy.
 - **28 automated tests** — Covering auth flows, chat ownership and persistence, analyzer validation, and Claude error handling (Claude is mocked).
 
 ---
