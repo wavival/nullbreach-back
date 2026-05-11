@@ -11,7 +11,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.environ["SECRET_KEY"]
+try:
+    SECRET_KEY = os.environ["SECRET_KEY"]
+except KeyError:
+    raise ImproperlyConfigured(
+        "SECRET_KEY environment variable is required. "
+        "Generate one with: "
+        'python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"'
+    )
 
 DEBUG = os.getenv("DEBUG", "False").lower() in ("true", "1", "yes")
 
