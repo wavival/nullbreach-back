@@ -7,12 +7,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.throttles import ClaudeScanThrottle
 from .claude import analyze_code
 from .serializers import ScanRequestSerializer, ScanResultSerializer
 
 
 class ScanView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ClaudeScanThrottle]
 
     @extend_schema(
         request=ScanRequestSerializer,

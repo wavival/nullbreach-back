@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.throttles import ClaudeChatThrottle
 from .claude import chat_completion
 from .models import ChatSession, Message
 from .serializers import ChatSessionSerializer, MessageSerializer, SendMessageSerializer
@@ -60,6 +61,11 @@ class ChatSessionDetailView(APIView):
 
 class MessageListCreateView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def get_throttles(self):
+        if self.request.method == "POST":
+            return [ClaudeChatThrottle()]
+        return super().get_throttles()
 
     def _get_session(self, request, session_id):
         try:
