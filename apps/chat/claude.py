@@ -12,7 +12,6 @@ SYSTEM_PROMPT = (
 def get_client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-
 def chat_completion(history: list[dict]) -> str:
     """
     Send conversation history to Claude and return the assistant reply.

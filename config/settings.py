@@ -215,7 +215,7 @@ LOGGING = {
 
 # ── Anthropic ──────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 if not DEBUG and not ANTHROPIC_API_KEY:
     raise ImproperlyConfigured("ANTHROPIC_API_KEY environment variable is required in production.")

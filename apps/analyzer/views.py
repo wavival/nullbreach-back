@@ -32,6 +32,20 @@ class ScanView(APIView):
 
         try:
             result = analyze_code(code, language)
+        except anthropic.NotFoundError as exc:
+            return Response(
+                {"detail": f"Claude model or resource not found: {exc}"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        except anthropic.RateLimitError as exc:
+            response = Response(
+                {"detail": f"Claude rate limit exceeded: {exc}"},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+            retry_after = getattr(exc, "response", None) and exc.response.headers.get("retry-after")
+            if retry_after:
+                response["Retry-After"] = retry_after
+            return response
         except anthropic.APIError as exc:
             return Response(
                 {"detail": f"Claude API error: {exc}"},
