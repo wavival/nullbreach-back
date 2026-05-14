@@ -2,7 +2,7 @@ import json
 import logging
 
 import anthropic
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.claude_errors import handle_claude_error
+from apps.ratelimit.decorators import check_rate_limit
 from apps.throttles import ClaudeScanThrottle
 
 from .claude import analyze_code
@@ -32,11 +33,26 @@ class ScanView(APIView):
 
     @extend_schema(
         request=ScanRequestSerializer,
-        responses={200: ScanResultSerializer},
+        responses={
+            200: ScanResultSerializer,
+            429: OpenApiResponse(
+                description=(
+                    "Daily limit reached. The response body contains `detail` "
+                    "and `reset_at` (ISO 8601 UTC timestamp of the next reset)."
+                )
+            ),
+        },
         summary="Analyze a code snippet for OWASP Top 10 vulnerabilities",
         tags=["analyzer"],
     )
+    @check_rate_limit(endpoint="analyzer_scan", limit_key="analyzer_scan")
     def post(self, request: Request) -> Response:
+        """Scan a code snippet for OWASP Top 10 vulnerabilities.
+
+        Returns 200 with the structured report, or 429 once the caller's daily
+        limit is reached — the 429 body carries `detail` and `reset_at` so the
+        frontend can show the user when access resumes.
+        """
         serializer = ScanRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

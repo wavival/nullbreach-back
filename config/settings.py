@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.chat",
     "apps.analyzer",
+    "apps.ratelimit",
 ]
 
 MIDDLEWARE = [
@@ -220,6 +221,14 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = env("CORS_ALLOWED_ORIGINS", default="http://localhost:5173").split(",")
 CORS_ALLOW_CREDENTIALS = True
 
+# ── CSRF ───────────────────────────────────────────────────────────────────────
+# Django 4+ requires the scheme on trusted origins. Needed for the Django admin
+# login when running behind Railway's TLS-terminating proxy; the JWT API itself
+# is CSRF-exempt. Defaults to the CORS origins so a single env var covers both.
+CSRF_TRUSTED_ORIGINS = env(
+    "CSRF_TRUSTED_ORIGINS", default=",".join(CORS_ALLOWED_ORIGINS)
+).split(",")
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 # `text` formatter is for local development (human-readable). In production
 # (DEBUG=False) we emit one JSON object per line so log aggregators
@@ -265,6 +274,15 @@ LOGGING = {
             "propagate": False,
         },
     },
+}
+
+# ── Rate limiting (daily, per-user, DB-backed) ─────────────────────────────────
+# Daily per-user request limits, persisted in the RateLimit table (see
+# apps/ratelimit). They reset at UTC midnight and are configurable via
+# environment variables. Independent of DRF throttling, which lives in the cache.
+RATE_LIMITS = {
+    "chat_messages": env.int("CHAT_DAILY_LIMIT", default=10),
+    "analyzer_scan": env.int("ANALYZER_DAILY_LIMIT", default=5),
 }
 
 # ── Anthropic ──────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.claude_errors import handle_claude_error
+from apps.ratelimit.decorators import check_rate_limit
 from apps.throttles import ClaudeChatThrottle
 
 from .claude import MAX_HISTORY_MESSAGES, chat_completion
@@ -143,11 +144,26 @@ class MessageListCreateView(GenericAPIView):
 
     @extend_schema(
         request=SendMessageSerializer,
-        responses={201: MessageSerializer},
+        responses={
+            201: MessageSerializer,
+            429: OpenApiResponse(
+                description=(
+                    "Daily limit reached. The response body contains `detail` "
+                    "and `reset_at` (ISO 8601 UTC timestamp of the next reset)."
+                )
+            ),
+        },
         summary="Send a message — calls Claude and returns the assistant reply",
         tags=["chat"],
     )
+    @check_rate_limit(endpoint="chat_messages", limit_key="chat_messages")
     def post(self, request: Request, session_id: int) -> Response:
+        """Send a message and return Claude's reply.
+
+        Returns 201 with the persisted assistant message, or 429 once the
+        caller's daily limit is reached — the 429 body carries `detail` and
+        `reset_at` so the frontend can show the user when access resumes.
+        """
         session = self._get_session(request, session_id)
         if session is None:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)

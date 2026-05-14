@@ -1,3 +1,6 @@
+<!-- TODO: add logo asset at docs/assets/logo.png and uncomment -->
+<!-- <p align="center"><img src="docs/assets/logo.png" alt="NullBreach" width="120"></p> -->
+
 # NullBreach API
 
 > AI-powered cybersecurity assistant backend — secure chat with Claude and OWASP Top 10 vulnerability analysis, built with Django REST Framework.
@@ -6,12 +9,18 @@
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
 ![Django](https://img.shields.io/badge/Django-5.1.4-092E20?logo=django&logoColor=white)
 ![DRF](https://img.shields.io/badge/DRF-3.15.2-A30000)
-![Tests](https://img.shields.io/badge/tests-49%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-56%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
-**Live demo:** [wavival.dev/nullbreach](https://wavival.dev/nullbreach)
-**Frontend repo:** [github.com/wavival/nullbreach-front](https://github.com/wavival/nullbreach-front)
-**Backend repo:** [github.com/wavival/nullbreach-back](https://github.com/wavival/nullbreach-back)
+[**Live demo**](https://wavival.dev/nullbreach) ·
+[**API docs (Swagger)**](https://nullbreach-back.up.railway.app/api/docs/) ·
+[**Frontend repo**](https://github.com/wavival/nullbreach-front) ·
+[**Backend repo**](https://github.com/wavival/nullbreach-back)
+
+<!-- TODO: confirm the live demo + API docs URLs once deployed to Railway -->
+
+NullBreach is the backend for an AI cybersecurity assistant: authenticated users chat with Claude about security and submit code snippets for an OWASP Top 10 vulnerability scan. It ships production-hardened and deploys to Railway out of the box.
 
 ---
 
@@ -24,8 +33,8 @@
 5. [API reference](#api-reference)
 6. [Database](#database)
 7. [Testing](#testing)
-8. [Deployment (Railway)](#deployment-railway)
-9. [Development](#development)
+8. [Development](#development)
+9. [Deployment](#deployment)
 10. [License](#license)
 11. [Contact](#contact)
 
@@ -40,12 +49,12 @@
 | **Database** | PostgreSQL (production) — SQLite fallback for local dev |
 | **Authentication** | JSON Web Tokens via `djangorestframework-simplejwt` 5.3.1 (access + refresh, rotation, blacklist) |
 | **AI** | Claude `claude-haiku-4-5-20251001` via the official Anthropic Python SDK (`anthropic` 0.101.0) |
-| **API docs** | OpenAPI 3 schema + Swagger UI via `drf-spectacular` 0.28.0 |
-| **Rate limiting** | Built-in DRF throttling (per-user, per-scope) |
+| **API docs** | OpenAPI 3 schema + Swagger UI + ReDoc via `drf-spectacular` 0.28.0 |
+| **Rate limiting** | DRF throttling (per-user, per-scope) **plus** a DB-backed daily per-user limit (`apps/ratelimit`) |
 | **Static files** | WhiteNoise (`CompressedManifestStaticFilesStorage`) |
 | **WSGI server** | Gunicorn 23.0.0 |
 | **CORS** | `django-cors-headers` 4.6.0 |
-| **Config** | `python-dotenv` + `dj-database-url` |
+| **Config** | `django-environ` + `dj-database-url` |
 | **Deployment** | Railway (`Procfile`-based) |
 
 ---
@@ -55,11 +64,11 @@
 - **Authentication** — Email-only custom user model, registration with password validation, JWT login, token refresh with rotation, logout that blacklists the refresh token, and an authenticated `/me/` endpoint.
 - **AI chat with persistent history** — Authenticated users create chat sessions and exchange messages with Claude. Full conversation history is persisted per session and replayed to Claude on each turn so context is preserved. Sessions are auto-titled from the first user message.
 - **OWASP Top 10 analyzer** — Submit a code snippet and an optional language; Claude returns a structured JSON report of detected vulnerabilities (severity, line, description, recommendation), a summary, and a 0–100 risk score.
-- **Per-endpoint rate limiting** — Strict throttles on Claude-backed endpoints (`60/h` chat, `20/h` scan) and a generous default for everything else (`500/h`).
-- **Auto-generated API docs** — Swagger UI at `/api/docs/` and OpenAPI 3 schema at `/api/schema/`, generated from view signatures and serializers via `drf-spectacular`.
-- **Request audit logging** — Every request is logged with method, path, status, and duration via a custom middleware.
+- **Per-endpoint rate limiting** — Two layers: DRF throttles on Claude-backed endpoints (`60/h` chat, `20/h` scan) plus a DB-backed **daily per-user limit** (10 chat messages/day, 5 analyzer scans/day) that persists across restarts and resets at UTC midnight. Exceeding the daily limit returns `429` with a `reset_at` timestamp.
+- **Auto-generated API docs** — Swagger UI at `/api/docs/`, ReDoc at `/api/schema/redoc/`, and the OpenAPI 3 schema at `/api/schema/`, generated from view signatures and serializers via `drf-spectacular`.
+- **Request audit logging** — Every request is logged with method, path, status, and duration via a custom middleware; every rate-limit check is logged for debugging.
 - **Production hardening** — Trusts the `X-Forwarded-Proto` header so HTTPS is recognised behind Railway's proxy. When `DEBUG=False`, session and CSRF cookies are marked secure, and the app refuses to boot without `ANTHROPIC_API_KEY`. SSL redirection and HSTS are intentionally delegated to the platform proxy.
-- **49 automated tests (90% coverage)** — Covering auth flows, chat ownership and persistence, analyzer validation, Claude error handling, and structured JSON logging (Claude is mocked).
+- **56 automated tests (91% coverage)** — Covering auth flows, chat ownership and persistence, analyzer validation, daily rate limiting, Claude error handling, and structured JSON logging (Claude is mocked).
 
 ---
 
@@ -133,18 +142,21 @@ curl -X POST http://localhost:8000/api/chat/sessions/ \
 
 ## Environment variables
 
-All variables are loaded from a `.env` file in the project root (via `python-dotenv`). The `.env.example` file in the repo contains commented examples for all six.
+All variables are loaded from a `.env` file in the project root (via `django-environ`). The `.env.example` file in the repo contains commented examples for every variable.
 
-| Variable | Required | Example | How to get it |
+| Variable | Required | Description | Example |
 |---|---|---|---|
-| `SECRET_KEY` | **Always** | `django-insecure-...` (50+ chars) | `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"` |
-| `DEBUG` | Always | `True` (dev) / `False` (prod) | Set manually. When `False`, the app enforces HTTPS, secure cookies, and HSTS, and refuses to boot without `ANTHROPIC_API_KEY`. |
-| `DATABASE_URL` | Optional in dev / **required in prod** | `postgresql://user:pass@host:5432/db` | From your Postgres provider (Railway, Supabase, Neon, local Postgres, etc.). If omitted in dev, Django uses local `sqlite:///db.sqlite3`. |
-| `ANTHROPIC_API_KEY` | **Required in prod** + needed for chat/analyzer to function | `sk-ant-api03-...` | [console.anthropic.com](https://console.anthropic.com/) → **Settings → API Keys → Create Key**. |
-| `ALLOWED_HOSTS` | Always | `localhost,127.0.0.1,api.example.com` | Comma-separated list of hostnames Django will accept. |
-| `CORS_ALLOWED_ORIGINS` | Always | `http://localhost:5173,https://wavival.dev` | Comma-separated list of frontend origins allowed to call the API. |
-| `REDIS_URL` | Optional | `redis://...` | If set, throttle counters use Redis. Otherwise the DB cache table is used (created by the `release` step on Railway). |
-| `SECURE_HSTS_SECONDS` | Optional (prod) | `31536000` | Override the 1-year HSTS default. Set to `0` to disable HSTS temporarily. |
+| `SECRET_KEY` | **Always** | Django cryptographic key. Generate with `python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`. | `django-insecure-...` (50+ chars) |
+| `DEBUG` | Always | `True` in dev, `False` in prod. When `False`, the app enforces HTTPS, secure cookies, and HSTS, and refuses to boot without `ANTHROPIC_API_KEY`. | `True` / `False` |
+| `DATABASE_URL` | Optional in dev / **required in prod** | PostgreSQL connection string. If omitted in dev, Django uses local `sqlite:///db.sqlite3`. | `postgresql://user:pass@host:5432/db` |
+| `ANTHROPIC_API_KEY` | **Required in prod** + needed for chat/analyzer to function | Claude API key from [console.anthropic.com](https://console.anthropic.com/) → Settings → API Keys. | `sk-ant-api03-...` |
+| `ALLOWED_HOSTS` | Always | Comma-separated list of hostnames Django will accept. | `localhost,127.0.0.1,api.example.com` |
+| `CORS_ALLOWED_ORIGINS` | Always | Comma-separated frontend origins allowed to call the API. | `http://localhost:5173,https://wavival.dev` |
+| `CSRF_TRUSTED_ORIGINS` | Optional | Comma-separated trusted origins (scheme required) for the Django admin behind a TLS proxy. Defaults to `CORS_ALLOWED_ORIGINS`. | `https://nullbreach-back.up.railway.app` |
+| `CHAT_DAILY_LIMIT` | Optional | Max chat messages per user per day. Defaults to `10`. | `10` |
+| `ANALYZER_DAILY_LIMIT` | Optional | Max analyzer scans per user per day. Defaults to `5`. | `5` |
+| `REDIS_URL` | Optional | If set, DRF throttle counters use Redis. Otherwise the DB cache table is used (created by the `release` step on Railway). | `redis://...` |
+| `SECURE_HSTS_SECONDS` | Optional (prod) | Override the 1-year HSTS default. Set to `0` to disable HSTS temporarily. | `31536000` |
 
 ---
 
@@ -156,7 +168,7 @@ All endpoints are prefixed with `/api/`. Authenticated endpoints require:
 Authorization: Bearer <access_token>
 ```
 
-Interactive documentation is auto-generated and available at `/api/docs/` (Swagger UI). The raw OpenAPI 3 schema is at `/api/schema/`.
+Interactive documentation is auto-generated: Swagger UI at `/api/docs/`, ReDoc at `/api/schema/redoc/`, and the raw OpenAPI 3 schema at `/api/schema/`.
 
 ### Auth — `/api/auth/`
 
@@ -182,7 +194,7 @@ Response (`201`):
   "refresh": "<jwt>"
 }
 ```
-Errors: `400` on duplicate email or password that fails Django's validators.
+Errors: `400` on duplicate email or a password that fails Django's validators.
 
 **Login** — `POST /api/auth/login/`
 
@@ -190,35 +202,25 @@ Request:
 ```json
 { "email": "user@example.com", "password": "StrongPass123!" }
 ```
-Response (`200`):
-```json
-{ "access": "<jwt>", "refresh": "<jwt>" }
-```
-Errors: `401` on bad credentials.
+Response (`200`): `{ "access": "<jwt>", "refresh": "<jwt>" }`. Errors: `401` on bad credentials.
 
-**Refresh** — `POST /api/auth/refresh/`
+**Refresh** — `POST /api/auth/refresh/` — Request `{ "refresh": "<jwt>" }` → `{ "access": "<jwt>", "refresh": "<jwt>" }` (new refresh; old one is blacklisted).
 
-Request: `{ "refresh": "<jwt>" }` → Response (`200`): `{ "access": "<jwt>", "refresh": "<jwt>" }` (new refresh; old one is blacklisted).
+**Logout** — `POST /api/auth/logout/` — Request `{ "refresh": "<jwt>" }` → `204 No Content`. Errors: `400` if the token is missing or invalid.
 
-**Logout** — `POST /api/auth/logout/`
-
-Request: `{ "refresh": "<jwt>" }` → `204 No Content`. Errors: `400` if the token is missing or invalid.
-
-**Me** — `GET /api/auth/me/`
-
-Response (`200`): `{ "id": 1, "email": "...", "date_joined": "..." }`. Errors: `401` if unauthenticated.
+**Me** — `GET /api/auth/me/` — Response (`200`): `{ "id": 1, "email": "...", "date_joined": "..." }`. Errors: `401` if unauthenticated.
 
 ---
 
 ### Chat — `/api/chat/`
 
-| Method | Path | Auth | Throttle | Description |
-|--------|------|:----:|----------|-------------|
+| Method | Path | Auth | Limits | Description |
+|--------|------|:----:|--------|-------------|
 | `GET` | `/api/chat/sessions/` | Yes | `user` (500/h) | List the caller's chat sessions |
 | `POST` | `/api/chat/sessions/` | Yes | `user` (500/h) | Create a new session |
 | `DELETE` | `/api/chat/sessions/{id}/` | Yes | `user` (500/h) | Delete a session and all its messages (cascade) |
 | `GET` | `/api/chat/sessions/{id}/messages/` | Yes | `user` (500/h) | List messages in a session (oldest first) |
-| `POST` | `/api/chat/sessions/{id}/messages/` | Yes | `claude_chat` (60/h) | Send a message; returns Claude's reply |
+| `POST` | `/api/chat/sessions/{id}/messages/` | Yes | `claude_chat` (60/h) + **10/day** | Send a message; returns Claude's reply |
 
 **Send message** — `POST /api/chat/sessions/{id}/messages/`
 
@@ -235,15 +237,16 @@ Response (`201`, the persisted assistant message):
   "created_at": "2026-05-11T12:00:00Z"
 }
 ```
-The session auto-titles itself from the first user message (truncated to 80 chars) if no title is set. Errors: `404` if the session doesn't belong to the caller, `502` if the Claude API fails, `429` when throttled.
+The session auto-titles itself from the first user message (truncated to 80 chars) if no title is set.
+Errors: `404` if the session doesn't belong to the caller, `502` if the Claude API fails, `429` when throttled or when the daily limit is reached (see [Daily rate limit](#daily-rate-limit)).
 
 ---
 
 ### Analyzer — `/api/analyzer/`
 
-| Method | Path | Auth | Throttle | Description |
-|--------|------|:----:|----------|-------------|
-| `POST` | `/api/analyzer/scan/` | Yes | `claude_scan` (20/h) | OWASP Top 10 vulnerability analysis of a code snippet |
+| Method | Path | Auth | Limits | Description |
+|--------|------|:----:|--------|-------------|
+| `POST` | `/api/analyzer/scan/` | Yes | `claude_scan` (20/h) + **5/day** | OWASP Top 10 vulnerability analysis of a code snippet |
 
 **Scan** — `POST /api/analyzer/scan/`
 
@@ -275,7 +278,22 @@ Response (`200`):
 - `line` may be `null`
 - `risk_score` is an integer `0–100`
 
-Errors: `400` on empty/missing code, `502` if Claude fails or returns unparseable JSON, `429` when throttled.
+Errors: `400` on empty/missing code, `502` if Claude fails or returns unparseable JSON, `429` when throttled or when the daily limit is reached.
+
+---
+
+### Daily rate limit
+
+Claude-backed endpoints enforce a DB-backed daily per-user limit on top of DRF throttling. When the limit is reached the endpoint responds `429`:
+
+```json
+{
+  "detail": "Daily limit reached. Try again tomorrow.",
+  "reset_at": "2026-05-15T00:00:00Z"
+}
+```
+
+`reset_at` is the next UTC midnight, when the counter resets. Limits are configurable via `CHAT_DAILY_LIMIT` and `ANALYZER_DAILY_LIMIT`.
 
 ---
 
@@ -285,6 +303,7 @@ Errors: `400` on empty/missing code, `502` if Claude fails or returns unparseabl
 |--------|------|:----:|-------------|
 | `GET` | `/api/schema/` | No | OpenAPI 3 schema (YAML) |
 | `GET` | `/api/docs/` | No | Interactive Swagger UI |
+| `GET` | `/api/schema/redoc/` | No | ReDoc documentation |
 | `*` | `/admin/` | Staff | Django admin (login required) |
 
 ---
@@ -299,7 +318,7 @@ Errors: `400` on empty/missing code, `502` if Claude fails or returns unparseabl
 | `400` | Bad request (validation error, missing field) |
 | `401` | Unauthenticated / invalid token |
 | `404` | Resource not found or not owned by the caller |
-| `429` | Throttled (rate limit exceeded) |
+| `429` | Rate limited (DRF throttle or daily limit exceeded) |
 | `502` | Bad Gateway (Claude API error or unparseable response) |
 
 ---
@@ -344,14 +363,30 @@ Default ordering: `-updated_at` (most recent first).
 
 Default ordering: `created_at` (oldest first).
 
+### `ratelimit.RateLimit`
+
+DB-backed daily request counter, one row per `(user, endpoint)`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | BigAuto PK | |
+| `user` | FK → `User` | `on_delete=CASCADE`, `related_name="rate_limits"` |
+| `endpoint` | CharField(64) | logical endpoint key (`chat_messages`, `analyzer_scan`) |
+| `count` | PositiveInteger | requests in the current window; default `0` |
+| `reset_at` | datetime | next UTC midnight; counter resets once passed |
+| `created_at` / `updated_at` | datetime | `auto_now_add` / `auto_now` |
+
+Unique constraint on `(user, endpoint)` — its index also serves the lookup.
+
 ### Relationships
 
 ```
 User ──< ChatSession ──< Message
- 1:N         1:N
+User ──< RateLimit
+ 1:N
 ```
 
-Deleting a `User` cascades to all their sessions; deleting a session cascades to all its messages. The analyzer is stateless and does not persist anything.
+Deleting a `User` cascades to all their sessions, messages, and rate-limit rows; deleting a session cascades to its messages. The analyzer is stateless and does not persist anything beyond its rate-limit counter.
 
 ---
 
@@ -365,7 +400,7 @@ The test suite covers the critical paths of each app. Claude is mocked in chat a
 python manage.py test tests
 ```
 
-Expected: **49 tests passing, ~90% coverage**.
+Expected: **56 tests passing, ~91% coverage**.
 
 ### Run a specific file
 
@@ -373,46 +408,28 @@ Expected: **49 tests passing, ~90% coverage**.
 python manage.py test tests.test_auth
 python manage.py test tests.test_chat
 python manage.py test tests.test_analyzer
+python manage.py test tests.test_ratelimit
 ```
+
+### Coverage report
+
+```bash
+coverage run --source=apps,config manage.py test tests
+coverage report
+```
+
+`pyproject.toml` sets `fail_under = 80`.
 
 ### What's covered
 
 | File | Tests | Coverage |
 |---|---|---|
-| `tests/test_auth.py` | 12 | Register success / duplicate email (silent 202) / weak password; login success / wrong password / unknown email; `/me/` authenticated / unauthenticated / invalid token; logout blacklists refresh / missing refresh / requires auth |
+| `tests/test_auth.py` | 12 | Register success / duplicate email / weak password; login success / wrong password / unknown email; `/me/` authenticated / unauthenticated / invalid token; logout blacklists refresh / missing refresh / requires auth |
 | `tests/test_chat.py` | 11 | Create session, list only own sessions, delete session, deleting other user's session returns 404, unauthenticated → 401, list messages (empty + ordered), send message persists both sides and calls Claude, auto-title on first message, cross-user message send returns 404, rolls back user message on Claude failure |
 | `tests/test_analyzer.py` | 6 | Authenticated scan returns structured result, default language, unauthenticated → 401, empty code → 400, missing code → 400, Claude API error → 502 |
+| `tests/test_ratelimit.py` | 7 | Requests succeed up to the daily limit, the request past the limit returns 429 with a clear payload (`reset_at` serialised as an ISO 8601 `Z` string), the counter resets after UTC midnight, limits are tracked per `(user, endpoint)`, a chat limit does not block the analyzer — for both chat and analyzer |
 | `tests/test_claude_errors.py` | 16 | `handle_claude_error` maps Anthropic error subclasses to DRF responses (401/404/429/502), preserves `Retry-After`, ignores non-Anthropic exceptions |
 | `tests/test_log_formatter.py` | 4 | `JSONFormatter` emits one JSON object per line; flattens exc_info; merges `extra={...}` fields; reserved fields not duplicated |
-
----
-
-## Deployment (Railway)
-
-The repo is configured to deploy out of the box on [Railway](https://railway.app/) via the `Procfile`:
-
-```
-web: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
-release: python manage.py migrate && python manage.py createcachetable
-```
-
-> **Why `createcachetable`?** The default cache backend in production is `DatabaseCache` (used by DRF throttling to share counters across Gunicorn workers). The release step creates the `django_cache` table once; subsequent deploys are no-ops. Set `REDIS_URL` if you'd rather use Redis.
-
-### Steps
-
-1. **Create a Railway project** and link it to your fork of this repository.
-2. **Add a PostgreSQL plugin** to the project. Railway will inject a `DATABASE_URL` variable automatically.
-3. **Set the remaining environment variables** in Railway's dashboard:
-   - `SECRET_KEY` — generated with the snippet from `.env.example`
-   - `DEBUG=False`
-   - `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com/)
-   - `ALLOWED_HOSTS` — your Railway domain (e.g. `nullbreach-back.up.railway.app`) plus any custom domain
-   - `CORS_ALLOWED_ORIGINS` — your frontend origin(s) (e.g. `https://wavival.dev`)
-4. **Deploy.** Railway runs the `release` command first (`migrate`), then starts Gunicorn. Static files are collected and served by WhiteNoise with manifest-based caching.
-5. **Create a superuser** on the running service:
-   ```bash
-   railway run python manage.py createsuperuser
-   ```
 
 ---
 
@@ -441,21 +458,31 @@ nullbreach-back/
 │   │   ├── serializers.py
 │   │   ├── views.py
 │   │   └── urls.py
-│   └── throttles.py     # ClaudeChatThrottle, ClaudeScanThrottle
+│   ├── ratelimit/       # DB-backed daily per-user rate limiting
+│   │   ├── models.py    # RateLimit
+│   │   ├── decorators.py # @check_rate_limit
+│   │   └── admin.py
+│   ├── throttles.py     # ClaudeChatThrottle, ClaudeScanThrottle, AuthAnonThrottle
+│   └── claude_errors.py # handle_claude_error
 ├── config/
 │   ├── settings.py      # All settings, DRF + JWT + throttling + logging
 │   ├── urls.py          # Root router (mounts apps and OpenAPI views)
 │   ├── middleware.py    # RequestAuditMiddleware
+│   ├── log_formatter.py # JSONFormatter
 │   ├── wsgi.py
 │   └── asgi.py
 ├── tests/
 │   ├── test_auth.py
 │   ├── test_chat.py
-│   └── test_analyzer.py
+│   ├── test_analyzer.py
+│   ├── test_ratelimit.py
+│   ├── test_claude_errors.py
+│   └── test_log_formatter.py
 ├── .env.example
 ├── manage.py
 ├── Procfile
 ├── requirements.txt
+├── requirements-dev.txt
 └── LICENSE
 ```
 
@@ -470,7 +497,7 @@ nullbreach-back/
 3. **Write a serializer** in `apps/my_module/serializers.py` (use `ModelSerializer` for CRUD, `Serializer` for custom payloads).
 4. **Write the view** in `apps/my_module/views.py`. Decorate with `@extend_schema(...)` so it appears correctly in Swagger. Set `permission_classes = [IsAuthenticated]` unless the endpoint is public.
 5. **Wire the URL** in `apps/my_module/urls.py` and include it from `config/urls.py` under `/api/<module>/`.
-6. **If the view calls Claude or another expensive backend**, define a custom throttle scope in `apps/throttles.py` and set `throttle_classes = [...]` on the view; add the corresponding rate to `DEFAULT_THROTTLE_RATES` in `config/settings.py`.
+6. **If the view calls Claude or another expensive backend**, define a custom throttle scope in `apps/throttles.py` and set `throttle_classes = [...]` on the view; add the corresponding rate to `DEFAULT_THROTTLE_RATES` in `config/settings.py`. For a daily per-user cap, apply `@check_rate_limit(...)` from `apps/ratelimit/decorators.py` and add a key to `RATE_LIMITS`.
 7. **Write tests** in `tests/test_<module>.py`. Mock external calls (`unittest.mock.patch`) so tests stay offline and deterministic.
 
 ### Conventions
@@ -481,13 +508,55 @@ nullbreach-back/
 - **Throttles per scope**: any Claude-backed view gets its own scope and rate.
 - **Permissions default to `IsAuthenticated`** (set globally in `REST_FRAMEWORK`). Override with `permission_classes = [AllowAny]` only where strictly necessary.
 - **Tests mock Claude** via `unittest.mock.patch("apps.<app>.views.<func>")` — never hit the live API from the suite.
+- **English throughout** — code, comments, docstrings, and documentation are all in English.
 - **Comments are reserved for non-obvious "why"** — well-named code is the default documentation.
+- **No hardcoded config** — secrets and tunables come from environment variables (see `.env.example`).
+
+---
+
+## Deployment
+
+The repo is configured to deploy out of the box on [Railway](https://railway.app/) via the `Procfile`:
+
+```
+web: gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 2
+release: python manage.py migrate && python manage.py createcachetable
+```
+
+> **Why `createcachetable`?** The default cache backend in production is `DatabaseCache` (used by DRF throttling to share counters across Gunicorn workers). The release step creates the `django_cache` table once; subsequent deploys are no-ops. Set `REDIS_URL` if you'd rather use Redis.
+
+### Steps
+
+1. **Create a Railway project** and link it to your fork of this repository.
+2. **Add a PostgreSQL plugin** to the project. Railway injects a `DATABASE_URL` variable automatically.
+3. **Set the remaining environment variables** in Railway's dashboard:
+   - `SECRET_KEY` — generated with the snippet from `.env.example`
+   - `DEBUG=False`
+   - `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com/)
+   - `ALLOWED_HOSTS` — your Railway domain (e.g. `nullbreach-back.up.railway.app`) plus any custom domain
+   - `CORS_ALLOWED_ORIGINS` — your frontend origin(s) (e.g. `https://wavival.dev`)
+   - `CSRF_TRUSTED_ORIGINS` — your Railway domain (with scheme) if you use the Django admin
+   - *(optional)* `CHAT_DAILY_LIMIT`, `ANALYZER_DAILY_LIMIT` to override the daily rate limits
+4. **Deploy.** Railway runs the `release` command first (`migrate` + `createcachetable`), then starts Gunicorn. Static files are collected and served by WhiteNoise with manifest-based caching.
+5. **Create a superuser** on the running service:
+   ```bash
+   railway run python manage.py createsuperuser
+   ```
+
+### Test the production build locally
+
+```bash
+DEBUG=False SECRET_KEY=... ANTHROPIC_API_KEY=... DATABASE_URL=... \
+  gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
+```
 
 ---
 
 ## License
 
 This project is licensed under the **MIT License** — see the [LICENSE](./LICENSE) file for the full text.
+
+Copyright © 2026 Valentina Ramírez.
 
 ---
 
