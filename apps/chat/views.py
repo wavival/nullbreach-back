@@ -145,7 +145,13 @@ class MessageListCreateView(GenericAPIView):
     @extend_schema(
         request=SendMessageSerializer,
         responses={
-            201: MessageSerializer,
+            201: OpenApiResponse(
+                response=MessageSerializer,
+                description=(
+                    "Message sent. Body contains `user_message` and "
+                    "`assistant_message`, each a serialized Message object."
+                ),
+            ),
             429: OpenApiResponse(
                 description=(
                     "Daily limit reached. The response body contains `detail` "
@@ -160,9 +166,10 @@ class MessageListCreateView(GenericAPIView):
     def post(self, request: Request, session_id: int) -> Response:
         """Send a message and return Claude's reply.
 
-        Returns 201 with the persisted assistant message, or 429 once the
-        caller's daily limit is reached — the 429 body carries `detail` and
-        `reset_at` so the frontend can show the user when access resumes.
+        Returns 201 with both persisted messages — `user_message` and
+        `assistant_message` — or 429 once the caller's daily limit is
+        reached; the 429 body carries `detail` and `reset_at` so the
+        frontend can show the user when access resumes.
         """
         session = self._get_session(request, session_id)
         if session is None:
@@ -192,7 +199,9 @@ class MessageListCreateView(GenericAPIView):
         # leave an orphaned user message in the session.
         with transaction.atomic():
             is_first_message = not session.messages.exists()
-            Message.objects.create(session=session, role=Message.Role.USER, content=user_content)
+            user_message = Message.objects.create(
+                session=session, role=Message.Role.USER, content=user_content
+            )
             assistant_message = Message.objects.create(
                 session=session,
                 role=Message.Role.ASSISTANT,
@@ -202,4 +211,10 @@ class MessageListCreateView(GenericAPIView):
                 session.title = user_content[:80]
                 session.save(update_fields=["title", "updated_at"])
 
-        return Response(MessageSerializer(assistant_message).data, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "user_message": MessageSerializer(user_message).data,
+                "assistant_message": MessageSerializer(assistant_message).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )

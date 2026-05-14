@@ -116,8 +116,10 @@ class MessageTests(APITestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(res.data["role"], "assistant")
-        self.assertEqual(res.data["content"], "Here is my security advice.")
+        self.assertEqual(res.data["user_message"]["role"], "user")
+        self.assertEqual(res.data["user_message"]["content"], "How do I prevent XSS?")
+        self.assertEqual(res.data["assistant_message"]["role"], "assistant")
+        self.assertEqual(res.data["assistant_message"]["content"], "Here is my security advice.")
 
         messages = Message.objects.filter(session=self.session)
         self.assertEqual(messages.count(), 2)
