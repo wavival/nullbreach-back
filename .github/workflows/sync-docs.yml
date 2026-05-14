@@ -1,0 +1,57 @@
+name: Sync Docs
+
+# Auto-sync CLAUDE.md / ARCHITECTURE.md / README.md when code or config changes.
+# The doc-sync commit only touches *.md files, and *.md is excluded from the
+# paths filter below, so the auto-commit can never retrigger this workflow.
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "apps/**/*.py"
+      - "requirements.txt"
+      - "config/**"
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+# The job pushes a commit back to the repo, so it needs write access.
+permissions:
+  contents: write
+
+concurrency:
+  # Never run two sync jobs on the same branch at once (avoids push races).
+  group: sync-docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history so the script can diff arbitrary commit ranges.
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install script dependencies
+        run: pip install requests
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync documentation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Commit range for this push. `before` is all-zeros on a brand-new
+          # branch; the script falls back to HEAD~1 in that case.
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: python scripts/sync-docs.py
