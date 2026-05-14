@@ -444,6 +444,7 @@ nullbreach-api/
 │   └── test_log_formatter.py
 ├── .env.example
 ├── .pre-commit-config.yaml  # Black + isort + Ruff hooks
+├── .python-version          # Python runtime pin (3.12) for the Railway build
 ├── CLAUDE.md                # Guidance for AI coding assistants
 ├── manage.py
 ├── Procfile

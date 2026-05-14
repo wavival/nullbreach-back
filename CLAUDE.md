@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Dev server (defaults to http://localhost:8000)
 python manage.py runserver
 
-# Run the full test suite (28 tests)
+# Run the full test suite (56 tests)
 python manage.py test tests
 
 # Run a single test file / class / method
@@ -30,11 +30,12 @@ Tests live under `tests/` (project-level), not inside each app. They use `APITes
 
 ### App layout
 
-Three feature apps live under `apps/` (not at the project root). They're imported as `apps.users`, `apps.chat`, `apps.analyzer` and registered as such in `INSTALLED_APPS`. A new app must be created with `python manage.py startapp <name> apps/<name>` and added with the `apps.` prefix.
+Four apps live under `apps/` (not at the project root). They're imported as `apps.users`, `apps.chat`, `apps.analyzer`, `apps.ratelimit` and registered as such in `INSTALLED_APPS`. A new app must be created with `python manage.py startapp <name> apps/<name>` and added with the `apps.` prefix.
 
-- **`apps.users`** — Custom email-only user model (`AUTH_USER_MODEL = "users.User"`, no `username` field) + JWT auth views (register/login/refresh/logout/me).
-- **`apps.chat`** — `ChatSession` 1:N `Message`. On `POST /messages/`, the view persists the user message, replays the full session history to Claude, persists the assistant reply, and auto-titles the session from the first user message.
-- **`apps.analyzer`** — Stateless OWASP Top 10 scanner. The `claude.py` system prompt forces JSON-only output; the view strips accidental markdown fences and returns either the parsed-and-revalidated payload or the raw dict if the structure is unexpected.
+- **`apps.users`** — Custom email-only user model (`AUTH_USER_MODEL = "users.User"`, no `username` field) + JWT auth views (register/login/refresh/logout/me). Register returns a generic `202` and is silent on duplicate email to avoid account enumeration.
+- **`apps.chat`** — `ChatSession` 1:N `Message`. On `POST /messages/`, the view persists the user message, replays the capped session history to Claude, persists the assistant reply, and auto-titles the session from the first user message.
+- **`apps.analyzer`** — Stateless OWASP Top 10 scanner. The `claude.py` system prompt forces JSON-only output; the view strips accidental markdown fences, re-validates through `ScanResultSerializer`, and surfaces any non-conforming output as `502`.
+- **`apps.ratelimit`** — DB-backed daily per-user request limiting. The `RateLimit` model holds one counter row per `(user, endpoint)`; the `@check_rate_limit` decorator (in `decorators.py`) locks the row with `select_for_update`, resets it past `reset_at` (UTC midnight), and returns `429` with a `reset_at` payload once the limit is hit. Independent of DRF throttling.
 
 `config/` holds settings, the root URL router, `middleware.py` (`RequestAuditMiddleware` logs `METHOD PATH STATUS DURATIONms` to the `audit` logger), and WSGI/ASGI entrypoints.
 
@@ -44,7 +45,12 @@ Each Claude-backed app has its own `claude.py` with its system prompt and a thin
 
 ### Throttling
 
-DRF throttling is configured with **named scopes** in `config/settings.py` (`user`, `claude_chat`, `claude_scan`). Custom scopes are wired through `apps/throttles.py` (a `UserRateThrottle` subclass per scope) and applied per-view either via `throttle_classes` or `get_throttles()` (used in `apps.chat.views.MessageListCreateView` to apply `claude_chat` only on `POST`, not `GET`). Any new Claude-backed view should get its own scope, not reuse `user`.
+There are **two independent layers**:
+
+1. **DRF throttling** (cache-backed, per-scope) configured with **named scopes** in `config/settings.py` (`user`, `anon`, `auth`, `claude_chat`, `claude_scan`). Custom scopes are wired through `apps/throttles.py` (`ClaudeChatThrottle`, `ClaudeScanThrottle`, `AuthAnonThrottle`, each re-reading its rate live so `@override_settings` works in tests) and applied per-view via `throttle_classes` or `get_throttles()` (used in `apps.chat.views.MessageListCreateView` to apply `claude_chat` only on `POST`, not `GET`). Any new Claude-backed view should get its own scope, not reuse `user`.
+2. **Daily per-user limiting** (DB-backed, in `apps.ratelimit`) applied with the `@check_rate_limit(endpoint=..., limit_key=...)` decorator on the view method; limits live in `settings.RATE_LIMITS` and are env-configurable (`CHAT_DAILY_LIMIT`, `ANALYZER_DAILY_LIMIT`).
+
+The DRF throttle cache backend matters in production: with multiple Gunicorn workers the counters must be shared, so it is Redis (`REDIS_URL`) or the DB cache table `django_cache`, never per-process `LocMemCache`.
 
 ### Auth model
 
@@ -59,9 +65,10 @@ Simple JWT is configured with **rotation + blacklist after rotation** — every 
 - **`SECRET_KEY`** uses `os.environ[...]` (not `getenv`) but is wrapped in a `try/except KeyError` that raises `ImproperlyConfigured` with a generation command. Don't unwrap it.
 - **`ANTHROPIC_API_KEY`** is enforced at startup (`ImproperlyConfigured`) only when `DEBUG=False`. In dev, chat and analyzer endpoints will fail at request time if it's missing.
 - **`DATABASE_URL`** is optional in dev — `dj-database-url` falls back to `sqlite:///db.sqlite3`. PostgreSQL is required in production.
-- **SSL is delegated to the Railway proxy.** `SECURE_SSL_REDIRECT = False` and `SECURE_HSTS_SECONDS = 0` are intentional — Django trusts `X-Forwarded-Proto` via `SECURE_PROXY_SSL_HEADER`. Re-enabling `SECURE_SSL_REDIRECT` behind a TLS-terminating proxy causes redirect loops.
-- **Deploy is Railway-driven**: `Procfile` declares `release: python manage.py migrate` and `web: gunicorn config.wsgi:application`. The `.env` file is git-ignored; production env vars must be set in the Railway dashboard.
-- **Static files** are served by WhiteNoise with `CompressedManifestStaticFilesStorage`. `collectstatic` runs automatically on Railway during the build.
+- **Only `.env` is loaded.** Both `manage.py` and `config/settings.py` call `environ.Env.read_env(BASE_DIR / ".env")`. There is no `.env.local` support; `.env.example` is the committed template. The `.env` file is git-ignored; production env vars must be set in the Railway dashboard.
+- **SSL is delegated to the Railway proxy.** `SECURE_SSL_REDIRECT = False` is intentional — Django trusts `X-Forwarded-Proto` via `SECURE_PROXY_SSL_HEADER`. Re-enabling `SECURE_SSL_REDIRECT` behind a TLS-terminating proxy causes redirect loops. `SECURE_HSTS_SECONDS` is `0` in dev/test and defaults to 1 year when `DEBUG=False`.
+- **Deploy is Railway-driven**: `Procfile` declares `release: python manage.py migrate && python manage.py createcachetable` and `web: gunicorn config.wsgi:application --workers 2`. `.python-version` pins the Python runtime for the Nixpacks build.
+- **Static files** are served by WhiteNoise with `CompressedManifestStaticFilesStorage`, configured through the **`STORAGES`** setting (Django 5.1 removed the old `STATICFILES_STORAGE` setting — do not reintroduce it, it is silently ignored). `collectstatic` runs automatically on Railway during the build.
 
 ## Conventions
 
